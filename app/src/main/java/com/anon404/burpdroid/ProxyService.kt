@@ -44,32 +44,39 @@ class ProxyService : Service() {
 
     private fun handleClient(clientSocket: Socket) {
         try {
-            val clientInput = clientSocket.getInputStream().bufferedReader()
+            val clientInputStream = clientSocket.getInputStream()
             val clientOutput = clientSocket.getOutputStream()
 
-            val requestLine = clientInput.readLine()
-            if (requestLine.isNullOrEmpty()) {
+            // We can't use bufferedReader here as it might read past the headers
+            val headers = mutableListOf<String>()
+            var line: String
+            val firstLine = readLine(clientInputStream)
+            if (firstLine.isNullOrEmpty()) {
                 clientSocket.close()
                 return
             }
+            headers.add(firstLine)
+            RequestLogger.addLog(">> $firstLine")
 
-            RequestLogger.addLog(">> $requestLine")
+            while (readLine(clientInputStream).also { line = it!! }.isNotEmpty()) {
+                headers.add(line)
+            }
 
             var host: String? = null
             var port = 80
-            val requestBuilder = StringBuilder("$requestLine\r\n")
-            var header: String?
-            while (clientInput.readLine().also { header = it } != null && header!!.isNotEmpty()) {
-                requestBuilder.append("$header\r\n")
-                if (header!!.lowercase().startsWith("host:")) {
-                    val hostParts = header!!.substring(5).trim().split(":")
+            var contentLength = 0
+
+            for (header in headers) {
+                if (header.lowercase().startsWith("host:")) {
+                    val hostParts = header.substring(5).trim().split(":")
                     host = hostParts[0]
                     if (hostParts.size > 1) {
                         port = hostParts[1].toIntOrNull() ?: 80
                     }
+                } else if (header.lowercase().startsWith("content-length:")) {
+                    contentLength = header.substring(15).trim().toIntOrNull() ?: 0
                 }
             }
-            requestBuilder.append("\r\n")
 
             if (host == null) {
                 clientSocket.close()
@@ -80,13 +87,31 @@ class ProxyService : Service() {
             val targetOutput = targetSocket.getOutputStream()
             val targetInput = targetSocket.getInputStream()
 
-            targetOutput.write(requestBuilder.toString().toByteArray())
+            // Write headers to target
+            for (header in headers) {
+                targetOutput.write((header + "\r\n").toByteArray())
+            }
+            targetOutput.write("\r\n".toByteArray())
             targetOutput.flush()
 
-            val buffer = ByteArray(4096)
-            var bytesRead: Int
-            while (targetInput.read(buffer).also { bytesRead = it } != -1) {
-                clientOutput.write(buffer, 0, bytesRead)
+            // Write request body if it exists
+            if (contentLength > 0) {
+                val bodyBuffer = ByteArray(contentLength)
+                var bytesRead = 0
+                while (bytesRead < contentLength) {
+                    val read = clientInputStream.read(bodyBuffer, bytesRead, contentLength - bytesRead)
+                    if (read == -1) break
+                    bytesRead += read
+                }
+                targetOutput.write(bodyBuffer, 0, bytesRead)
+                targetOutput.flush()
+            }
+
+            // Relay response back to client
+            val responseBuffer = ByteArray(4096)
+            var responseBytesRead: Int
+            while (targetInput.read(responseBuffer).also { responseBytesRead = it } != -1) {
+                clientOutput.write(responseBuffer, 0, responseBytesRead)
                 clientOutput.flush()
             }
 
@@ -96,6 +121,30 @@ class ProxyService : Service() {
             e.printStackTrace()
             RequestLogger.addLog("Error handling client: ${e.message}")
         }
+    }
+
+    // Helper function to read a line from an InputStream
+    private fun readLine(inputStream: java.io.InputStream): String? {
+        val line = StringBuilder()
+        while (true) {
+            val nextByte = inputStream.read()
+            if (nextByte == -1) {
+                return if (line.isEmpty()) null else line.toString()
+            }
+            val c = nextByte.toChar()
+            if (c == '\r') {
+                // Handle CRLF, peek at the next character
+                inputStream.mark(1)
+                if (inputStream.read().toChar() != '\n') {
+                    inputStream.reset()
+                }
+                break
+            } else if (c == '\n') {
+                break
+            }
+            line.append(c)
+        }
+        return line.toString()
     }
 
 

@@ -4,28 +4,46 @@ import android.content.Intent
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 
-// NOTE: UI interaction code is commented out due to environment limitations.
+import android.widget.Button
+import android.widget.TextView
+
 public class MainActivity : AppCompatActivity() {
 
+    private lateinit var startButton: Button
+    private lateinit var logsButton: Button
+    private lateinit var statusText: TextView
     private var isIntercepting = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // setContentView(R.layout.activity_main)
+        setContentView(R.layout.activity_main)
 
-        // val startButton = findViewById(R.id.startButton)
-        // val logsButton = findViewById(R.id.logsButton)
+        startButton = findViewById(R.id.startButton)
+        logsButton = findViewById(R.id.logsButton)
+        statusText = findViewById(R.id.statusText)
 
-        // startButton.setOnClickListener {
-        //     isIntercepting = !isIntercepting
-        //     toggleProxyService()
-        //     // updateUI()
-        // }
-        //
-        // logsButton.setOnClickListener {
-        //     val intent = Intent(this, LogsActivity::class.java)
-        //     startActivity(intent)
-        // }
+        startButton.setOnClickListener {
+            isIntercepting = !isIntercepting
+            toggleProxyService()
+            updateUI()
+        }
+
+        logsButton.setOnClickListener {
+            val intent = Intent(this, LogsActivity::class.java)
+            startActivity(intent)
+        }
+
+        updateUI()
+    }
+
+    private fun updateUI() {
+        if (isIntercepting) {
+            startButton.text = "Stop Intercept"
+            statusText.text = "Status: Running"
+        } else {
+            startButton.text = "Start Intercept"
+            statusText.text = "Status: Idle"
+        }
     }
 
     private fun toggleProxyService() {
